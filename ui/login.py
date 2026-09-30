@@ -131,17 +131,25 @@ class LoginFrame(ctk.CTkFrame):
             self._set_status("Please enter username and password.")
             return
 
+        from utils.security import authenticate, hash_password
+
+        user = None
+        ok = False
         session = get_session()
         try:
-            user = (
-                session.query(User)
-                .filter(User.username == username, User.password_hash == password)
-                .first()
-            )
+            user = session.query(User).filter(User.username == username).first()
+            if user is not None:
+                ok, needs_upgrade = authenticate(user.password_hash, password)
+                # Transparently migrate legacy plaintext rows to a hash.
+                if ok and needs_upgrade:
+                    user.password_hash = hash_password(password)
+                    # Re-upload so the cloud copy replaces any legacy plaintext.
+                    user.synced = False
+                    session.commit()
         finally:
             session.close()
 
-        if user is None:
+        if user is None or not ok:
             self._set_status("Invalid credentials.")
             return
 

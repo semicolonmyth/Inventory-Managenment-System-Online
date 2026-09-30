@@ -269,7 +269,14 @@ class CloudUploader:
         print("Stock transactions upload finished.")
 
     def upload_users(self) -> None:
-        users = list(self.session.query(models.User).all())
+        # Only push rows that changed since the last sync. After the hashing
+        # fix the stored value is a PBKDF2 hash (never a raw password), so the
+        # credential material sent to the cloud is already non-reversible.
+        users = list(
+            self.session.query(models.User)
+            .filter(models.User.synced.is_(False))
+            .all()
+        )
         if not users:
             print("No users to upload.")
             return

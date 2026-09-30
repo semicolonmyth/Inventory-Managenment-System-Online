@@ -11,7 +11,9 @@ import tkinter.ttk as ttk
 
 from db.local_db import get_session,get_by_id
 from db.models import Invoice, InvoiceItem, Product, StockTransaction, Setting
+from db.stock import InsufficientStockError, reserve_lines
 from utils.config import load_config
+from utils.pricing import compute_totals
 from utils.invoice import generate_invoice_pdf
 from utils.theme_utils import get_theme_color, get_theme_button_color
 from utils.units import (
@@ -1125,33 +1127,10 @@ class NewSaleFrame(ctk.CTkFrame):
                 tags=("profit_loss",) if profit_per_unit < 0 else (),
             )
 
-        # Deduct stock immediately (optimistic update)
-        new_stock = current_stock - qty_for_stock
-        session2 = get_session()
-        try:
-            p2 = get_by_id(session2, Product, product_id)
-            if p2:
-                p2.stock_qty = new_stock
-                p2.synced = False  # Ensure cloud uploader picks up the change
-                tx = StockTransaction(
-                    product_id=p2.id,
-                    change_qty=-qty_for_stock,
-                    remaining_stock=new_stock,
-                    reason="Billing - Sale",
-                )
-                session2.add(tx)
-                session2.commit()
-
-                # Update Supabase
-                try:
-                    self._update_supabase_product_stock(p2.sku, new_stock)
-                except Exception:
-                    pass  # Silent fail for cloud sync
-        except Exception:
-            session2.rollback()
-            raise
-        finally:
-            session2.close()
+        # NOTE: stock is NOT deducted here. With reserve-until-commit, the
+        # deduction happens atomically inside the invoice transaction at
+        # bill generation (_generate_bill -> db.stock.reserve_lines), so an
+        # abandoned sale never reduces inventory.
 
         self._refresh_totals()
         self._on_search_change()  # Refresh product list
@@ -1405,42 +1384,23 @@ class NewSaleFrame(ctk.CTkFrame):
                 else new_qty
             )
 
-            # Check stock
+            # Advisory availability check only. Under reserve-until-commit the
+            # authoritative (atomic) reservation happens when the bill is
+            # generated, so editing a cart line must NOT touch DB stock.
             session = get_session()
             try:
                 product = get_by_id(session, Product, line["product_id"])
-                current_stock = (
-                    product.stock_qty or 0
-                ) + old_qty_for_stock  # Add back old qty
-                if current_stock < new_qty_for_stock:
-                    stock_display = format_quantity(current_stock, unit_type)
-                    self._show_error_popup(
-                        f"Insufficient stock! Available: {stock_display}"
-                    )
-                    # Don't destroy window, let user correct it
-                    return
-
-                # Update stock
-                diff = new_qty_for_stock - old_qty_for_stock
-                product.stock_qty = current_stock - new_qty_for_stock
-                product.synced = False  # Ensure cloud uploader picks up the change
-                if abs(diff) > 0.0001:  # Use small epsilon for float comparison
-                    tx = StockTransaction(
-                        product_id=product.id,
-                        change_qty=-diff,
-                        remaining_stock=product.stock_qty,
-                        reason="Billing - Price/Quantity Update",
-                    )
-                    session.add(tx)
-                session.commit()
-
-                # Update Supabase
-                try:
-                    self._update_supabase_product_stock(product.sku, product.stock_qty)
-                except Exception:
-                    pass
+                available = product.stock_qty or 0
             finally:
                 session.close()
+
+            if available < new_qty_for_stock:
+                stock_display = format_quantity(available, unit_type)
+                self._show_error_popup(
+                    f"Insufficient stock! Available: {stock_display}"
+                )
+                # Don't destroy window, let user correct it
+                return
 
             # Update cart line
             line["qty"] = new_qty
@@ -1499,8 +1459,26 @@ class NewSaleFrame(ctk.CTkFrame):
                 if item_id:
                     self._delete_cart_item(item_id)
 
+    def _cart_stock_pairs(self) -> list:
+        """Return ``[(product_id, base_unit_qty), ...]`` for the current cart.
+
+        Weight items (kg/g) are normalized to kg so stock (kept in kg) is
+        deducted in its base unit; piece items use their quantity directly.
+        """
+        pairs = []
+        for line in self.lines:
+            unit_type = line.get("unit_type", "piece") or "piece"
+            qty = float(line["qty"] or 0)
+            base_qty = (
+                normalize_to_kg(qty, unit_type)
+                if unit_type in ("kg", "g")
+                else qty
+            )
+            pairs.append((line["product_id"], float(base_qty)))
+        return pairs
+
     def _delete_cart_item(self, item_id: str) -> None:
-        """Delete a single item from cart and restore its stock."""
+        """Delete a single item from the cart (no stock change)."""
         children = list(self.lines_table.get_children())
         if item_id not in children:
             return
@@ -1511,33 +1489,9 @@ class NewSaleFrame(ctk.CTkFrame):
 
         line = self.lines[idx]
 
-        # Only restore stock if bill was NOT generated
-        if not self.bill_generated:
-            session = get_session()
-            try:
-                product = get_by_id(session, Product, line["product_id"])
-                if product:
-                    unit_type = line.get("unit_type", "piece") or "piece"
-                    qty_to_restore = (
-                        normalize_to_kg(line["qty"], unit_type)
-                        if unit_type in ["kg", "g"]
-                        else line["qty"]
-                    )
-                    product.stock_qty = (product.stock_qty or 0) + qty_to_restore
-                    product.synced = False  # Ensure cloud uploader picks up the change
-                    tx = StockTransaction(
-                        product_id=product.id,
-                        change_qty=qty_to_restore,
-                        remaining_stock=product.stock_qty,
-                        reason="Billing - Item Removed from Cart",
-                    )
-                    session.add(tx)
-                session.commit()
-            except Exception:
-                session.rollback()
-            finally:
-                session.close()
-
+        # No stock change: cart lines are only deducted when the bill is
+        # generated (reserve-until-commit), so removing a cart line frees
+        # nothing in inventory.
         # Remove from cart
         self.lines.pop(idx)
         self.lines_table.delete(item_id)
@@ -1546,37 +1500,12 @@ class NewSaleFrame(ctk.CTkFrame):
         self._show_toast(f"{line['name']} removed from cart.")
 
     def _clear_cart(self) -> None:
-        """Clear entire cart and restore stock (only if bill was not generated)."""
+        """Clear the entire cart (no stock change under reserve-until-commit)."""
         if not self.lines:
             return
 
-        # Only restore stock if bill was NOT generated
-        if not self.bill_generated:
-            session = get_session()
-            try:
-                for line in self.lines:
-                    product = get_by_id(session, Product, line["product_id"])
-                    if product:
-                        unit_type = line.get("unit_type", "piece") or "piece"
-                        qty_to_restore = (
-                            normalize_to_kg(line["qty"], unit_type)
-                            if unit_type in ["kg", "g"]
-                            else line["qty"]
-                        )
-                        product.stock_qty = (product.stock_qty or 0) + qty_to_restore
-                        product.synced = False  # Ensure cloud uploader picks up the change
-                        tx = StockTransaction(
-                            product_id=product.id,
-                            change_qty=qty_to_restore,
-                            remaining_stock=product.stock_qty,
-                            reason="Billing - Cart Cleared",
-                        )
-                        session.add(tx)
-                session.commit()
-            except Exception:
-                session.rollback()
-            finally:
-                session.close()
+        # Cart lines are only deducted at bill generation, so clearing an
+        # unbilled cart never needs to restore inventory.
 
         # Clear UI
         was_generated = self.bill_generated  # Store flag before reset
@@ -1615,27 +1544,29 @@ class NewSaleFrame(ctk.CTkFrame):
         except ValueError:
             discount_value = 0.0
 
-        if discount_type == "Percentage":
-            self.discount_percent = discount_value
-            self.discount_fixed = 0.0
-            discount_amount = subtotal * (self.discount_percent / 100.0)
-        else:  # Fixed
-            self.discount_percent = 0.0
-            self.discount_fixed = discount_value
-            discount_amount = min(
-                self.discount_fixed, subtotal
-            )  # Can't discount more than subtotal
-
         # Tax calculation
         try:
             self.tax_percent = float(self.tax_entry.get() or "0")
         except ValueError:
             self.tax_percent = 0.0
 
-        # Calculate on amount after discount
-        amount_after_discount = subtotal - discount_amount
-        tax_amount = amount_after_discount * (self.tax_percent / 100.0)
-        net_total = amount_after_discount + tax_amount
+        totals = compute_totals(
+            subtotal,
+            discount_type=discount_type,
+            discount_value=discount_value,
+            tax_percent=self.tax_percent,
+        )
+        discount_amount = totals["discount_amount"]
+        tax_amount = totals["tax_amount"]
+        net_total = totals["grand_total"]
+
+        # Store the per-field breakdown used by the Invoice record.
+        if discount_type == "Percentage":
+            self.discount_percent = discount_value
+            self.discount_fixed = 0.0
+        else:  # Fixed
+            self.discount_percent = 0.0
+            self.discount_fixed = discount_value
 
         # Update UI
         self.subtotal_label.configure(text=f"{subtotal:.2f}")
@@ -1753,7 +1684,8 @@ class NewSaleFrame(ctk.CTkFrame):
             self.customer["uid"] = self._generate_customer_uid()
         self.customer["name"] = customer_name
 
-        # Calculate totals
+        # Calculate totals via the shared pricing module so the stored invoice
+        # and the printed receipt can never diverge.
         subtotal = sum(l["total"] for l in self.lines)
         discount_type = self.discount_type_combo.get()
         try:
@@ -1761,25 +1693,28 @@ class NewSaleFrame(ctk.CTkFrame):
         except ValueError:
             discount_value = 0.0
 
-        if discount_type == "Percentage":
-            self.discount_percent = discount_value
-            self.discount_fixed = 0.0
-            discount_amount = subtotal * (discount_value / 100.0)
-        else:
-            self.discount_percent = 0.0
-            self.discount_fixed = min(discount_value, subtotal)
-            discount_amount = self.discount_fixed
-
-        amount_after_discount = subtotal - discount_amount
-
         # Update tax percent from UI before calculating
         try:
             self.tax_percent = float(self.tax_entry.get() or "0")
         except ValueError:
             self.tax_percent = 0.0
 
-        tax_amount = amount_after_discount * (self.tax_percent / 100.0)
-        net_total = amount_after_discount + tax_amount
+        totals = compute_totals(
+            subtotal,
+            discount_type=discount_type,
+            discount_value=discount_value,
+            tax_percent=self.tax_percent,
+        )
+        discount_amount = totals["discount_amount"]
+        tax_amount = totals["tax_amount"]
+        net_total = totals["grand_total"]
+
+        if discount_type == "Percentage":
+            self.discount_percent = discount_value
+            self.discount_fixed = 0.0
+        else:
+            self.discount_percent = 0.0
+            self.discount_fixed = discount_amount
 
         # Save to database
         self.current_payment_method = payment_method
@@ -1848,9 +1783,19 @@ class NewSaleFrame(ctk.CTkFrame):
                 )
                 session.add(item)
 
+            # Reserve (deduct) stock atomically inside this same transaction.
+            # Stock is only consumed once the invoice is committed, so an
+            # abandoned sale never reduces inventory, and any line that exceeds
+            # available stock aborts the entire save.
+            reserve_lines(session, self._cart_stock_pairs())
+
             session.commit()
             # Mark bill as generated successfully
             self.bill_generated = True
+        except InsufficientStockError as exc:
+            session.rollback()
+            self._show_error_popup(exc.user_message())
+            return
         except Exception:
             session.rollback()
             self._show_error_popup("Failed to save bill to database.")
@@ -1975,18 +1920,21 @@ class NewSaleFrame(ctk.CTkFrame):
         if self.discount_percent > 0:
             discount_type = "Percentage"
             discount_value = self.discount_percent
-            discount_amount = subtotal * (self.discount_percent / 100.0)
         elif self.discount_fixed > 0:
             discount_type = "Fixed"
             discount_value = self.discount_fixed
-            discount_amount = self.discount_fixed
         else:
             discount_type = "Percentage"
             discount_value = 0.0
-            discount_amount = 0.0
 
-        amount_after_discount = subtotal - discount_amount
-        tax_amount = amount_after_discount * (self.tax_percent / 100.0)
+        totals = compute_totals(
+            subtotal,
+            discount_type=discount_type,
+            discount_value=discount_value,
+            tax_percent=self.tax_percent,
+        )
+        discount_amount = totals["discount_amount"]
+        tax_amount = totals["tax_amount"]
 
         # Get current user's username
         current_user = getattr(self.app, "current_user", None)

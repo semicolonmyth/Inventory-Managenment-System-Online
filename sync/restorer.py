@@ -56,10 +56,31 @@ class CloudRestorer:
             )
         return resp.json()
 
+    def _clear_local_data(self) -> None:
+        """Delete all local rows in FK-safe order (children before parents).
+
+        With ``PRAGMA foreign_keys=ON`` (see db.local_db) a parent row cannot
+        be removed while a child still references it, so the wipe must start
+        from the leaf tables and work upward.
+        """
+        for model in (
+            models.InvoiceItem,
+            models.StockTransaction,
+            models.Invoice,
+            models.Product,
+            models.User,
+            models.Expense,
+        ):
+            self.session.query(model).delete()
+        self.session.commit()
+
     def restore_all(self) -> None:
         """Restore all data from Supabase to local database."""
         print("Starting backup restore from Supabase...")
-        
+
+        # Wipe everything children-first so FK constraints are never violated.
+        self._clear_local_data()
+
         # Restore in order: users, products, invoices, invoice_items, stock_transactions, settings
         self.restore_users()
         self.restore_products()

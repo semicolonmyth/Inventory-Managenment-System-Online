@@ -5,7 +5,7 @@ import customtkinter as ctk
 import tkinter.ttk as ttk
 
 from db.local_db import get_session, get_by_id
-from db.models import InvoiceItem, Product
+from db.models import InvoiceItem, Product, StockTransaction
 
 
 class ProductsFrame(ctk.CTkFrame):
@@ -598,10 +598,20 @@ class ProductsFrame(ctk.CTkFrame):
                 InvoiceItem.product_id == product_id
             ).count()
 
-            if invoice_count > 0:
+            # Stock history also references the product (FK integrity).
+            stock_tx_count = session.query(StockTransaction).filter(
+                StockTransaction.product_id == product_id
+            ).count()
+
+            if invoice_count > 0 or stock_tx_count > 0:
+                reason = (
+                    f"used in {invoice_count} invoice(s)"
+                    if invoice_count > 0
+                    else f"has {stock_tx_count} stock transaction(s)"
+                )
                 self._show_error(
                     f"Cannot delete product '{product.name}'. "
-                    f"It is used in {invoice_count} invoice(s). "
+                    f"It is {reason}. "
                     f"Disable it instead."
                 )
                 return

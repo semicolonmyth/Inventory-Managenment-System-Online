@@ -429,6 +429,13 @@ class MainWindow(ctk.CTk):
     def show_frame(self, key: str) -> None:
         if hasattr(self, "nav_buttons"):
             self._refresh_nav()
+        # Defense-in-depth RBAC: employee management is admin-only. The nav
+        # already hides it, but block programmatic navigation too.
+        if key == "employees" and not (
+            getattr(self, "current_user", None)
+            and getattr(self.current_user, "is_admin", False)
+        ):
+            return
         if key == "dashboard":
             if getattr(self, "current_user", None) and getattr(
                 self.current_user, "is_admin", False
@@ -825,8 +832,11 @@ class MainWindow(ctk.CTk):
             self._show_password_status("Password must be at least 3 characters.", "red")
             return
 
-        # Verify current password
-        if self.current_user.password_hash != current:
+        # Verify current password (supports legacy plaintext rows via authenticate)
+        from utils.security import hash_password, authenticate
+
+        current_ok, _ = authenticate(self.current_user.password_hash, current)
+        if not current_ok:
             self._show_password_status("Current password is incorrect.", "red")
             return
 
@@ -838,9 +848,11 @@ class MainWindow(ctk.CTk):
         try:
             user = get_by_id(session, User, self.current_user.id)
             if user:
-                user.password_hash = new
+                new_hash = hash_password(new)
+                user.password_hash = new_hash
+                user.synced = False
                 session.commit()
-                self.current_user.password_hash = new
+                self.current_user.password_hash = new_hash
                 self._show_password_status("Password changed successfully!", "green")
                 # Clear fields
                 self.current_password_entry.delete(0, "end")
@@ -1128,6 +1140,7 @@ class MainWindow(ctk.CTk):
 
             from db.local_db import get_session
             from db.models import User
+            from utils.security import hash_password
 
             session = get_session()
             try:
@@ -1141,7 +1154,9 @@ class MainWindow(ctk.CTk):
 
                 # Create new user
                 new_user = User(
-                    username=username, password_hash=password, is_admin=is_admin
+                    username=username,
+                    password_hash=hash_password(password),
+                    is_admin=is_admin,
                 )
                 session.add(new_user)
                 session.commit()
@@ -1244,7 +1259,9 @@ class MainWindow(ctk.CTk):
 
                 # Update password if provided
                 if new_password:
-                    db_user.password_hash = new_password
+                    from utils.security import hash_password
+                    db_user.password_hash = hash_password(new_password)
+                    db_user.synced = False
 
                 # Update role
                 db_user.is_admin = is_admin
@@ -1307,12 +1324,26 @@ class MainWindow(ctk.CTk):
 
         def confirm_delete() -> None:
             from db.local_db import get_session
-            from db.models import User
+            from db.models import User, Invoice
 
             session = get_session()
             try:
                 db_user = get_by_id(session, User, user.id)
                 if db_user:
+                    # FK integrity: a user with sales on record cannot be
+                    # removed (their invoices reference them).
+                    invoice_count = (
+                        session.query(Invoice)
+                        .filter(Invoice.user_id == user.id)
+                        .count()
+                    )
+                    if invoice_count:
+                        self._show_error_popup(
+                            f"Cannot delete '{user.username}': they have "
+                            f"{invoice_count} sale(s) on record. Historical "
+                            "sales must keep their cashier reference."
+                        )
+                        return
                     session.delete(db_user)
                     session.commit()
                     win.destroy()

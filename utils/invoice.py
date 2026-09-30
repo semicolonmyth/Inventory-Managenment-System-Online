@@ -24,6 +24,7 @@ from typing import Any, Iterable, Optional, Protocol
 
 from fpdf import FPDF
 from utils.units import format_quantity
+from utils.pricing import compute_totals
 
 
 class InvoiceLine(Protocol):
@@ -446,37 +447,27 @@ def _build_context(invoice_number, lines, customer, subtotal, discount_amount,
 
     if subtotal is None:
         subtotal = calc_subtotal
-    subtotal = _to_float(subtotal)
 
-    # --- Discount / tax / grand total (same logic as before) -----------------
-    if discount_amount is None:
-        if discount_type == "Percentage" and discount_value:
-            discount_amount = subtotal * (_to_float(discount_value) / 100.0)
-        elif discount_type == "Fixed" and discount_value:
-            discount_amount = min(_to_float(discount_value), subtotal)
-        else:
-            discount_amount = 0.0
-    discount_amount = max(_to_float(discount_amount), 0.0)
-
-    amount_after_discount = subtotal - discount_amount
-    if tax_amount is None:
-        tax_amount = (amount_after_discount * (_to_float(tax_percent) / 100.0)
-                      if tax_percent else 0.0)
-    tax_amount = _to_float(tax_amount)
-    shipping = _to_float(shipping)
-
-    grand_total = amount_after_discount + tax_amount + shipping
-    paid = _to_float(amount_paid) if amount_paid is not None else None
-    balance_due = grand_total - (paid or 0.0)
-
-    if status:
-        status = _clean(status)
-    elif paid is None or paid <= 0:
-        status = "Unpaid"
-    elif paid >= grand_total - 0.005:
-        status = "Paid"
-    else:
-        status = "Partially Paid"
+    # --- Discount / tax / grand total / status (shared pricing module) --------
+    totals = compute_totals(
+        subtotal,
+        discount_amount=discount_amount,
+        discount_type=discount_type,
+        discount_value=discount_value,
+        tax_percent=tax_percent,
+        tax_amount=tax_amount,
+        shipping=shipping,
+        amount_paid=amount_paid,
+        status=status,
+    )
+    subtotal = totals["subtotal"]
+    discount_amount = totals["discount_amount"]
+    tax_amount = totals["tax_amount"]
+    shipping = totals["shipping"]
+    grand_total = totals["grand_total"]
+    paid = totals["amount_paid"]
+    balance_due = totals["balance_due"]
+    status = _clean(totals["status"])
 
     # --- Bill To entries (skip anything empty) -------------------------------
     customer = customer or {}

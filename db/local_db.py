@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 from .models import Base, User
+from utils.security import hash_password
 
 
 def get_database_url() -> str:
@@ -51,6 +52,22 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
+
+
+@event.listens_for(engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+    """SQLite ignores FK constraints unless this pragma is set per-connection.
+
+    Enabling it keeps referential integrity (invoices -> users, items ->
+    products, etc.). Callers that must bulk-delete parents (e.g. the cloud
+    restorer) clear child rows first so no constraint is violated.
+    """
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
+
 
 SessionLocal = scoped_session(
     sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -296,12 +313,16 @@ def init_db() -> None:
     try:
         has_user = session.query(User).first() is not None
         if not has_user:
-            admin = User(username="admin", password_hash="admin", is_admin=True)
+            admin = User(
+                username="admin", password_hash=hash_password("admin"), is_admin=True
+            )
             session.add(admin)
             session.commit()
         existing_user = session.query(User).filter(User.username == "user").first()
         if existing_user is None:
-            standard_user = User(username="user", password_hash="user", is_admin=False)
+            standard_user = User(
+                username="user", password_hash=hash_password("user"), is_admin=False
+            )
             session.add(standard_user)
             session.commit()
     except Exception:

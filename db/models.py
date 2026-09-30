@@ -19,7 +19,7 @@ Base = declarative_base()
 class TimestampMixin:
     """Common timestamp and sync fields for all tables."""
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
     last_modified = Column(
         DateTime,
         default=datetime.utcnow,
@@ -29,6 +29,7 @@ class TimestampMixin:
         Boolean,
         default=False,
         nullable=False,
+        index=True,
         doc="True when successfully uploaded to cloud.",
     )
 
@@ -54,7 +55,7 @@ class Product(TimestampMixin, Base):
     price = Column(Float, nullable=False, default=0.0)  # legacy field (kept for compatibility)
     sale_price = Column(Float, nullable=False, default=0.0)
     cost_price = Column(Float, nullable=False, default=0.0)
-    stock_qty = Column(Float, nullable=False, default=0.0)
+    stock_qty = Column(Float, nullable=False, default=0.0, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
     unit_type = Column(String(20), default="piece", nullable=False, doc="Unit type: 'piece', 'kg', or 'g'")
     base_unit_price = Column(Float, nullable=False, default=0.0, doc="Price per unit (per piece, per kg, or per gram)")
