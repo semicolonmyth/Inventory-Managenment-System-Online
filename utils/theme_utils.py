@@ -1,6 +1,4 @@
-"""
-Theme utility functions for getting theme-aware colors.
-"""
+
 
 import customtkinter as ctk
 import json

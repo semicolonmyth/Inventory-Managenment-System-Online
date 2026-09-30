@@ -11,7 +11,7 @@ from tkinter import filedialog
 from sqlalchemy import func, and_, or_
 from sqlalchemy.orm import Session
 
-from db.local_db import get_session
+from db.local_db import get_session, get_by_id
 from db.models import Invoice, InvoiceItem, Product, User, StockTransaction
 from utils.invoice import generate_invoice_pdf
 from utils.theme_utils import get_theme_color, adjust_color_brightness
@@ -61,7 +61,7 @@ class ReportsFrame(ctk.CTkFrame):
         cards_frame.grid(
             row=0, column=0, sticky="nw", padx=10, pady=(5, 5)
         )  # Changed to nw and reduced top padding
-        for i in range(6):
+        for i in range(7):
             cards_frame.columnconfigure(i, weight=1)
 
         # Get theme-aware colors
@@ -70,6 +70,8 @@ class ReportsFrame(ctk.CTkFrame):
         warning_color = get_theme_color("warning")
         info_color = get_theme_color("info")
         error_color = get_theme_color("error")
+        
+        discount_color = adjust_color_brightness(warning_color, 0.8) if warning_color else "#F59E0B"
 
         # Card 1: Today's Profit
         self.today_card = self._create_summary_card(
@@ -96,12 +98,17 @@ class ReportsFrame(ctk.CTkFrame):
             cards_frame, "Low Stock Items", "0", 4, error_color
         )
 
-        # Card 6: Total Sale
+        # Card 6: Total Discount
+        self.total_discount_card = self._create_summary_card(
+            cards_frame, "Total Discount", "₨0.00", 5, discount_color
+        )
+
+        # Card 7: Total Sale
         total_sale_color = (
             adjust_color_brightness(primary_color, 0.6) if primary_color else "#6C757D"
         )
         self.total_sale_card = self._create_summary_card(
-            cards_frame, "Total Sale", "₨0.00", 5, total_sale_color
+            cards_frame, "Total Sale", "₨0.00", 6, total_sale_color
         )
 
     def _create_summary_card(
@@ -417,6 +424,9 @@ class ReportsFrame(ctk.CTkFrame):
                 else:
                     total_profit += item_profit_per_unit * quantity
 
+            # Deduct overall discounts from total profit
+            total_profit -= total_discounts
+
             avg_order = total_sales / total_orders if total_orders > 0 else 0
 
             # Update labels
@@ -452,13 +462,21 @@ class ReportsFrame(ctk.CTkFrame):
                         "net": 0.0,
                         "profit": 0.0,
                     }
-                daily_data[day]["orders"].add(inv.id)
-                daily_data[day]["revenue"] += inv.total_amount or 0
-                daily_data[day]["discount"] += (inv.total_amount or 0) * (
-                    inv.discount_percent or 0
-                ) / 100.0 + (inv.discount_fixed or 0)
-                daily_data[day]["tax"] += inv.tax_amount or 0
-                daily_data[day]["net"] += inv.net_amount or 0
+                
+                # Add invoice-level totals only once per invoice
+                is_new_invoice = inv.id not in daily_data[day]["orders"]
+                if is_new_invoice:
+                    daily_data[day]["orders"].add(inv.id)
+                    daily_data[day]["revenue"] += inv.total_amount or 0
+                    inv_discount = (inv.total_amount or 0) * (
+                        inv.discount_percent or 0
+                    ) / 100.0 + (inv.discount_fixed or 0)
+                    daily_data[day]["discount"] += inv_discount
+                    daily_data[day]["tax"] += inv.tax_amount or 0
+                    daily_data[day]["net"] += inv.net_amount or 0
+                    # Deduct the invoice-level discount from profit
+                    daily_data[day]["profit"] -= inv_discount
+
                 # Calculate profit for this item
                 unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = item.quantity or 0.0
@@ -707,7 +725,7 @@ class ReportsFrame(ctk.CTkFrame):
                     .all()
                 )
                 for item in items:
-                    product = session.query(Product).get(item.product_id)
+                    product = get_by_id(session, Product, item.product_id)
                     if product:
                         name = product.name
                         if name not in product_data:
@@ -1113,7 +1131,7 @@ class ReportsFrame(ctk.CTkFrame):
         """Show invoice preview popup."""
         session = get_session()
         try:
-            invoice = session.query(Invoice).get(invoice_id)
+            invoice = get_by_id(session, Invoice, invoice_id)
             if not invoice:
                 return
 
@@ -1169,7 +1187,7 @@ class ReportsFrame(ctk.CTkFrame):
 
             items_text = ""
             for item in items:
-                product = session.query(Product).get(item.product_id)
+                product = get_by_id(session, Product, item.product_id)
                 product_name = product.name if product else "Unknown"
                 unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = (
@@ -1197,7 +1215,11 @@ class ReportsFrame(ctk.CTkFrame):
             discount = (invoice.total_amount or 0) * (
                 invoice.discount_percent or 0
             ) / 100.0 + (invoice.discount_fixed or 0)
-            ctk.CTkLabel(content, text=f"Discount: ₨{discount:.2f}").pack(anchor="w")
+            ctk.CTkLabel(
+                content, 
+                text=f"Discount: ₨{discount:.2f}",
+                font=ctk.CTkFont(weight="bold")
+            ).pack(anchor="w")
             ctk.CTkLabel(content, text=f"Tax: ₨{invoice.tax_amount or 0:.2f}").pack(
                 anchor="w"
             )
@@ -1242,7 +1264,7 @@ class ReportsFrame(ctk.CTkFrame):
         session = get_session()
         try:
             for item in items:
-                product = session.query(Product).get(item.product_id)
+                product = get_by_id(session, Product, item.product_id)
                 unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = (
                     getattr(item, "quantity_exact", item.quantity) or item.quantity
@@ -1273,7 +1295,7 @@ class ReportsFrame(ctk.CTkFrame):
         # Get username from invoice user
         username = None
         if invoice.user_id:
-            user = session.query(User).get(invoice.user_id)
+            user = get_by_id(session, User, invoice.user_id)
             if user:
                 username = user.username
 
@@ -1615,10 +1637,16 @@ class ReportsFrame(ctk.CTkFrame):
         except Exception:
             return None
 
-    def _load_initial_data(self) -> None:
-        """Load initial summary data."""
+    def refresh_data(self) -> None:
+        """Refresh all report data from the database."""
         self._refresh_summary_cards()
         self._refresh_sales_reports()
+        if hasattr(self, "invoices_table"): # if invoice tab initialized
+            self._refresh_invoice_list()
+
+    def _load_initial_data(self) -> None:
+        """Load initial summary data."""
+        self.refresh_data()
 
     def _refresh_summary_cards(self) -> None:
         """Refresh summary cards."""
@@ -1649,6 +1677,12 @@ class ReportsFrame(ctk.CTkFrame):
                     today_profit += item_profit_per_unit * (quantity / 1000.0)
                 else:
                     today_profit += item_profit_per_unit * quantity
+            
+            # Deduct today's discount from today's profit
+            today_invoices = session.query(Invoice).filter(func.date(Invoice.created_at) == today.isoformat()).all()
+            today_discount = sum((inv.total_amount or 0) * (inv.discount_percent or 0) / 100.0 + (inv.discount_fixed or 0) for inv in today_invoices)
+            today_profit -= today_discount
+
             self.today_card.configure(text=f"₨{today_profit:.2f}")
 
             # Monthly profit: sum of (sale_price - cost_price) * quantity for all invoice items this month
@@ -1670,6 +1704,12 @@ class ReportsFrame(ctk.CTkFrame):
                     month_profit += item_profit_per_unit * (quantity / 1000.0)
                 else:
                     month_profit += item_profit_per_unit * quantity
+            
+            # Deduct this month's discount from monthly profit
+            month_invoices = session.query(Invoice).filter(func.date(Invoice.created_at) >= month_start.isoformat()).all()
+            month_discount = sum((inv.total_amount or 0) * (inv.discount_percent or 0) / 100.0 + (inv.discount_fixed or 0) for inv in month_invoices)
+            month_profit -= month_discount
+            
             self.month_card.configure(text=f"₨{month_profit:.2f}")
 
             # Total customers (unique customer UIDs)
@@ -1702,6 +1742,11 @@ class ReportsFrame(ctk.CTkFrame):
                 func.coalesce(func.sum(Invoice.net_amount), 0.0)
             ).scalar()
             self.total_sale_card.configure(text=f"₨{total_sale:.2f}")
+
+            # Total overall discount
+            all_invoices = session.query(Invoice).all()
+            total_discount_overall = sum((inv.total_amount or 0) * (inv.discount_percent or 0) / 100.0 + (inv.discount_fixed or 0) for inv in all_invoices)
+            self.total_discount_card.configure(text=f"₨{total_discount_overall:.2f}")
 
         finally:
             session.close()

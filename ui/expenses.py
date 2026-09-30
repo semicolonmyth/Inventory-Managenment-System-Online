@@ -174,7 +174,7 @@ class ExpensesFrame(ctk.CTkFrame):
     def _open_expense_dialog(self, expense_id: Optional[int] = None) -> None:
         session = get_session()
         try:
-            expense = session.query(Expense).get(expense_id) if expense_id else None
+            expense = get_by_id(session, Expense, expense_id) if expense_id else None
         finally:
             session.close()
 
@@ -229,7 +229,7 @@ class ExpensesFrame(ctk.CTkFrame):
             session_local = get_session()
             try:
                 if expense_id:
-                    e = session_local.query(Expense).get(expense_id)
+                    e = get_by_id(session_local, Expense, expense_id)
                 else:
                     e = Expense()
                     session_local.add(e)
@@ -261,7 +261,7 @@ class ExpensesFrame(ctk.CTkFrame):
 
         session = get_session()
         try:
-            e = session.query(Expense).get(expense_id)
+            e = get_by_id(session, Expense, expense_id)
             if e:
                 session.delete(e)
                 session.commit()

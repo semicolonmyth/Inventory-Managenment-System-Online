@@ -51,7 +51,7 @@ class DashboardFrame(ctk.CTkFrame):
         warning_color = get_theme_color("warning")
         error_color = get_theme_color("error")
         accent_color = get_theme_color("accent")
-        
+
         # Row 0: three top cards (reuse existing labels for values)
         sales_card = ctk.CTkFrame(
             cards_container,
@@ -131,7 +131,7 @@ class DashboardFrame(ctk.CTkFrame):
             text_color=error_color,
         )
         low_stock_title.pack(padx=16, pady=(10, 4), anchor="w")
-        
+
         # Low stock items label
         self.low_stock_label = ctk.CTkLabel(
             low_stock_card,
@@ -140,7 +140,7 @@ class DashboardFrame(ctk.CTkFrame):
             text_color=error_color,
         )
         self.low_stock_label.pack(padx=16, pady=(4, 2), anchor="w")
-        
+
         # Top items label
         self.top_items_label = ctk.CTkLabel(
             low_stock_card,
@@ -242,7 +242,7 @@ class DashboardFrame(ctk.CTkFrame):
                 unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = item.quantity or 0.0
                 item_profit_per_unit = getattr(item, "profit", 0.0) or 0.0
-                
+
                 if unit_type == "g":
                     profit += item_profit_per_unit * (quantity / 1000.0)
                 else:
@@ -262,7 +262,7 @@ class DashboardFrame(ctk.CTkFrame):
                 .limit(3)
                 .all()
             )
-            
+
             # Get low stock items (stock < 5 for pieces, < 0.1 for weight-based)
             all_products = session.query(Product).filter(Product.is_active == True).all()
             low_stock_items = []
@@ -274,7 +274,7 @@ class DashboardFrame(ctk.CTkFrame):
                     from utils.units import format_quantity
                     stock_display = format_quantity(stock, unit_type)
                     low_stock_items.append(f"{product.name} ({stock_display})")
-            
+
         finally:
             session.close()
 
@@ -329,7 +329,7 @@ class UserDashboardFrame(ctk.CTkFrame):
         error_color = get_theme_color("error")
         accent_color = get_theme_color("accent")
         card_colors = get_card_colors()
-        
+
         cards_container = ctk.CTkFrame(main,fg_color="transparent")
         cards_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=(4, 8))
         cards_container.columnconfigure(0, weight=1)
@@ -395,7 +395,7 @@ class UserDashboardFrame(ctk.CTkFrame):
             command=lambda: self._go("billing"),
             width=140,
         ).pack(padx=16, pady=(4, 10), anchor="n")
-        
+
         # Add low stock card for user dashboard
         low_stock_card_user = ctk.CTkFrame(
             cards_container,
@@ -461,7 +461,7 @@ class UserDashboardFrame(ctk.CTkFrame):
                 .filter(func.date(Invoice.created_at) == today.isoformat())
                 .scalar()
             )
-            
+
             # Get low stock items (stock < 5 for pieces, < 0.1 for weight-based)
             all_products = session.query(Product).filter(Product.is_active == True).all()
             low_stock_items = []
@@ -477,7 +477,7 @@ class UserDashboardFrame(ctk.CTkFrame):
             session.close()
         self.user_sales_label.configure(text=f"Sales: {sales_count}")
         self.user_revenue_label.configure(text=f"Revenue: {revenue:.2f}")
-        
+
         # Display low stock items
         if low_stock_items:
             low_stock_text = ", ".join(low_stock_items[:5])  # Limit to 5 items
@@ -486,4 +486,3 @@ class UserDashboardFrame(ctk.CTkFrame):
             self.user_low_stock_label.configure(text=f"⚠ Low stock: {low_stock_text}")
         else:
             self.user_low_stock_label.configure(text="Low stock: (none)")
-

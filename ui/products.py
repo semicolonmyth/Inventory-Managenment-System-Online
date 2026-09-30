@@ -4,7 +4,7 @@ from typing import Optional
 import customtkinter as ctk
 import tkinter.ttk as ttk
 
-from db.local_db import get_session
+from db.local_db import get_session, get_by_id
 from db.models import InvoiceItem, Product
 
 
@@ -158,17 +158,17 @@ class ProductsFrame(ctk.CTkFrame):
             command=self._inventory_actions,
             fg_color="#e0a800", # Orange/Yellow to stand out
             hover_color="#c69500",
-            text_color="black", 
+            text_color="black",
             width=100
         )
-        
+
         # Layout bottom buttons
         edit_btn.grid(row=0, column=0, padx=(12, 6), pady=8, sticky="w")
         toggle_btn.grid(row=0, column=1, padx=6, pady=8, sticky="w")
         custom_btn.grid(row=0, column=2, padx=6, pady=8, sticky="w")
         stock_btn.grid(row=0, column=3, padx=6, pady=8, sticky="w")
         self.inv_actions_btn.grid(row=0, column=4, padx=6, pady=8, sticky="w")
-        
+
         # Delete button is column 5 if visible
         # Refresh button pushed to right
         refresh_btn.grid(row=0, column=6, padx=(6, 12), pady=8, sticky="e")
@@ -225,10 +225,10 @@ class ProductsFrame(ctk.CTkFrame):
             else:
                 sale_display = f"{sale_base:.2f}/piece"
                 cost_display = f"{cost_base:.2f}/piece"
-            
+
             # Display stock with unit
             stock_display = f"{p.stock_qty:.2f}" if unit_type in ["kg", "g"] else f"{p.stock_qty:.0f}"
-            
+
             self.table.insert(
                 "",
                 "end",
@@ -258,7 +258,7 @@ class ProductsFrame(ctk.CTkFrame):
     def _open_product_dialog(self, product_id: Optional[int] = None) -> None:
         session = get_session()
         try:
-            product = session.query(Product).get(product_id) if product_id else None
+            product = get_by_id(session, Product, product_id) if product_id else None
         finally:
             session.close()
 
@@ -345,7 +345,7 @@ class ProductsFrame(ctk.CTkFrame):
             sku = sku_entry.get().strip()
             category = category_entry.get().strip()
             unit_type = unit_type_combo.get()
-            
+
             if not name:
                 self._show_error("Product name is required!")
                 return
@@ -379,7 +379,7 @@ class ProductsFrame(ctk.CTkFrame):
             session_local = get_session()
             try:
                 if product_id:
-                    p = session_local.query(Product).get(product_id)
+                    p = get_by_id(session_local, Product, product_id)
                     if not p:
                         return
                 else:
@@ -420,7 +420,7 @@ class ProductsFrame(ctk.CTkFrame):
 
         session = get_session()
         try:
-            product = session.query(Product).get(product_id)
+            product = get_by_id(session, Product, product_id)
         finally:
             session.close()
 
@@ -457,7 +457,7 @@ class ProductsFrame(ctk.CTkFrame):
 
             session_local = get_session()
             try:
-                p = session_local.query(Product).get(product_id)
+                p = get_by_id(session_local, Product, product_id)
                 if not p:
                     return
                 p.extra_fields = data
@@ -485,7 +485,7 @@ class ProductsFrame(ctk.CTkFrame):
         if product_id is None:
             self._show_error("Please select a product.")
             return
-            
+
         from ui.inventory_actions import InventoryActionsDialog
         InventoryActionsDialog(self, product_id, self.load_products)
 
@@ -498,7 +498,7 @@ class ProductsFrame(ctk.CTkFrame):
 
         session = get_session()
         try:
-            p = session.query(Product).get(product_id)
+            p = get_by_id(session, Product, product_id)
             if not p:
                 return
             p.is_active = not p.is_active
@@ -521,7 +521,7 @@ class ProductsFrame(ctk.CTkFrame):
 
         session = get_session()
         try:
-            product = session.query(Product).get(product_id)
+            product = get_by_id(session, Product, product_id)
         finally:
             session.close()
 
@@ -551,7 +551,7 @@ class ProductsFrame(ctk.CTkFrame):
 
             session_local = get_session()
             try:
-                p = session_local.query(Product).get(product_id)
+                p = get_by_id(session_local, Product, product_id)
                 if not p:
                     return
                 p.stock_qty = qty
@@ -588,7 +588,7 @@ class ProductsFrame(ctk.CTkFrame):
 
         session = get_session()
         try:
-            product = session.query(Product).get(product_id)
+            product = get_by_id(session, Product, product_id)
             if not product:
                 self._show_error("Product not found.")
                 return
@@ -620,7 +620,7 @@ class ProductsFrame(ctk.CTkFrame):
             def confirm_delete() -> None:
                 session_local = get_session()
                 try:
-                    p = session_local.query(Product).get(product_id)
+                    p = get_by_id(session_local, Product, product_id)
                     if p:
                         session_local.delete(p)
                         session_local.commit()
@@ -673,4 +673,3 @@ class ProductsFrame(ctk.CTkFrame):
 
         ok_btn = ctk.CTkButton(win, text="OK", command=win.destroy, width=100)
         ok_btn.pack(padx=20, pady=(10, 20))
-

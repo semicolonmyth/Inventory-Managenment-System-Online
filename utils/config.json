@@ -1,9 +1,9 @@
 {
-    "title": "Store Management System",
-    "theme": "themes/lavender.json",
-    "api_url": "https://qdkufjfyimvhdiibozol.supabase.co",
-    "supabase_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFka3VmamZ5aW12aGRpaWJvem9sIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NzY4OTA3OSwiZXhwIjoyMDgzMjY1MDc5fQ.cqlZO6DYw-7XNA7Oj-hoSVwbOFf7GClQidE6gGQk1kU",
-    "ui_scaling": 0.8999999999999999,
-    "installation_id": "ed5534b4-39a2-40ae-ad75-7bb54a5b9643",
-    "max_offline_days": 1
+  "title": "Store Management System",
+  "theme": "themes/lavender.json",
+  "api_url": "https://dnmxosusrfwdnshozpoo.supabase.co",
+  "supabase_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRubXhvc3VzcmZ3ZG5zaG96cG9vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5Mzc0MjYsImV4cCI6MjEwNDUxMzQyNn0.f8Yi2VpHSKSJ9QvkqSAvjOq4F4imCqdO1dOaxn5SU2A",
+  "ui_scaling": 0.8999999999999999,
+  "installation_id": "ed5534b4-39a2-40ae-ad75-7bb54a5b9643",
+  "max_offline_days": 1
 }

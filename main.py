@@ -4,7 +4,7 @@ from pathlib import Path
 from PIL import Image
 
 
-from db.local_db import get_session, init_db
+from db.local_db import get_by_id, get_session, init_db
 from sync.uploader import CloudUploader
 from sync.restorer import CloudRestorer
 from ui.dashboard import AdminDashboardFrame, UserDashboardFrame
@@ -262,7 +262,9 @@ class MainWindow(ctk.CTk):
         self.footer.columnconfigure(0, weight=1)
 
         # Animated footer label
-        footer_text = "Store Management System by Semicolon! For any help| Contact: 03253260029"
+        footer_text = (
+            "Store Management System by Semicolon! For any help| Contact: 03253260029"
+        )
         self.footer_label = ctk.CTkLabel(
             self.footer,
             text=footer_text,
@@ -466,6 +468,8 @@ class MainWindow(ctk.CTk):
                         self.frames["expenses"].load_expenses()
                 elif key == "reports":
                     self.top_title_label.configure(text="Reports")
+                    if hasattr(self.frames.get("reports"), "refresh_data"):
+                        self.frames["reports"].refresh_data()
                 elif key == "settings":
                     self.top_title_label.configure(text="Settings")
                 elif key == "employees":
@@ -832,7 +836,7 @@ class MainWindow(ctk.CTk):
 
         session = get_session()
         try:
-            user = session.query(User).get(self.current_user.id)
+            user = get_by_id(session, User, self.current_user.id)
             if user:
                 user.password_hash = new
                 session.commit()
@@ -1003,7 +1007,7 @@ class MainWindow(ctk.CTk):
 
         session = get_session()
         try:
-            user = session.query(User).get(user_id)
+            user = get_by_id(session, User, user_id)
             if user:
                 self._edit_employee(user)
         finally:
@@ -1020,7 +1024,7 @@ class MainWindow(ctk.CTk):
 
         session = get_session()
         try:
-            user = session.query(User).get(user_id)
+            user = get_by_id(session, User, user_id)
             if user:
                 self._delete_employee(user)
         finally:
@@ -1069,7 +1073,7 @@ class MainWindow(ctk.CTk):
 
         session = get_session()
         try:
-            user = session.query(User).get(user_id)
+            user = get_by_id(session, User, user_id)
             if user:
                 self._edit_employee(user)
         finally:
@@ -1219,7 +1223,7 @@ class MainWindow(ctk.CTk):
             session = get_session()
             try:
                 # Get user from database
-                db_user = session.query(User).get(user.id)
+                db_user = get_by_id(session, User, user.id)
                 if not db_user:
                     status_label.configure(text="User not found.", text_color="red")
                     return
@@ -1307,7 +1311,7 @@ class MainWindow(ctk.CTk):
 
             session = get_session()
             try:
-                db_user = session.query(User).get(user.id)
+                db_user = get_by_id(session, User, user.id)
                 if db_user:
                     session.delete(db_user)
                     session.commit()
@@ -1381,14 +1385,20 @@ class MainWindow(ctk.CTk):
             uploader = CloudUploader(session)
             uploader.upload_all()
             if hasattr(self, "upload_status_label"):
-                self.upload_status_label.configure(text="Sync completed successfully.", text_color="green")
+                self.upload_status_label.configure(
+                    text="Sync completed successfully.", text_color="green"
+                )
             self._show_toast("Sync completed successfully.")
         except Exception as exc:
             msg = str(exc)
             # Check for common network errors to give friendlier message
-            if "NameResolutionError" in msg or "ConnectionError" in msg or "getaddrinfo failed" in msg:
-                 msg = f"Connection failed. Please check your internet.\n({msg})"
-            
+            if (
+                "NameResolutionError" in msg
+                or "ConnectionError" in msg
+                or "getaddrinfo failed" in msg
+            ):
+                msg = f"Connection failed. Please check your internet.\n({msg})"
+
             if hasattr(self, "upload_status_label"):
                 self.upload_status_label.configure(
                     text=f"Sync failed: {msg}", text_color="red"
@@ -1397,7 +1407,7 @@ class MainWindow(ctk.CTk):
             try:
                 self._show_error_popup(f"Sync failed: {msg}")
             except Exception:
-                pass # Fallback if popup fails
+                pass  # Fallback if popup fails
         finally:
             try:
                 session.close()

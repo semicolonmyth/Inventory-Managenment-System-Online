@@ -11,11 +11,7 @@ from utils.config import load_config
 
 
 class CloudRestorer:
-    """Download and restore data from Supabase to local SQLite database.
-    
-    This class handles downloading all data from Supabase tables and
-    restoring them to the local database, replacing existing data.
-    """
+    """Download and restore data from Supabase to local SQLite database."""
 
     def __init__(
         self,
@@ -23,7 +19,7 @@ class CloudRestorer:
         supabase_url: Optional[str] = None,
         supabase_key: Optional[str] = None,
     ) -> None:
-        self.session = session
+        self.session: Session = session
 
         app_cfg = load_config()
         url = supabase_url or app_cfg.api_url
@@ -35,20 +31,19 @@ class CloudRestorer:
                 "Set them in config.json or pass to CloudRestorer."
             )
 
-        if url.endswith("/"):
-            url = url[:-1]
+        url = url.removesuffix("/")
 
-        self.base_url = url
-        self.api_key = key
+        self.base_url: str = url
+        self.api_key: str = key
 
-    def _headers(self) -> dict:
+    def _headers(self) -> dict[str, str]:
         return {
             "apikey": self.api_key,
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
 
-    def _get_rows(self, table: str, select: Optional[str] = None) -> List[dict]:
+    def _get_rows(self, table: str, select: str | None = None) -> list[dict[str, object]]:
         """Fetch all rows from a Supabase table."""
         url = f"{self.base_url}/rest/v1/{table}"
         if select:
@@ -108,14 +103,6 @@ class CloudRestorer:
             self.session.add(user)
             username_to_id[user.username] = user
         
-        self.session.flush()  # Get IDs assigned
-        
-        # Update IDs to match Supabase
-        for row, user in zip(rows, self.session.query(models.User).all()):
-            if row.get("id") and hasattr(user, "id"):
-                # Note: SQLite auto-increment IDs will differ, but we'll use username mapping
-                pass
-        
         self.session.commit()
         print(f"Restored {len(rows)} users.")
 
@@ -157,7 +144,6 @@ class CloudRestorer:
             self.session.add(product)
             sku_to_product[product.sku] = product
         
-        self.session.flush()
         self.session.commit()
         print(f"Restored {len(rows)} products.")
         return sku_to_product
@@ -215,7 +201,6 @@ class CloudRestorer:
             self.session.add(invoice)
             invoice_number_to_invoice[invoice.number] = invoice
         
-        self.session.flush()
         self.session.commit()
         print(f"Restored {len(rows)} invoices.")
         return invoice_number_to_invoice

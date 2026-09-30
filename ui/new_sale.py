@@ -9,7 +9,7 @@ import webbrowser
 import customtkinter as ctk
 import tkinter.ttk as ttk
 
-from db.local_db import get_session
+from db.local_db import get_session,get_by_id
 from db.models import Invoice, InvoiceItem, Product, StockTransaction, Setting
 from utils.config import load_config
 from utils.invoice import generate_invoice_pdf
@@ -118,7 +118,7 @@ class NewSaleFrame(ctk.CTkFrame):
         self.qty_entry.grid(row=1, column=1, padx=(0, 5), pady=6, sticky="w")
         self.qty_entry.bind("<KeyRelease>", self._on_qty_change)
         self.qty_entry.bind("<Return>", lambda e: self.add_current_line())
-        
+
         self.selected_product_unit_type = "piece"
         self.selected_product_sale_price = 0.0
         self.selected_product_cost_price = 0.0
@@ -699,7 +699,7 @@ class NewSaleFrame(ctk.CTkFrame):
         product_id = int(selection[0])
         session = get_session()
         try:
-            product = session.query(Product).get(product_id)
+            product = get_by_id(session, Product, product_id)
             if product:
                 unit_type = getattr(product, "unit_type", "piece") or "piece"
                 self.selected_product_unit_type = unit_type
@@ -745,7 +745,7 @@ class NewSaleFrame(ctk.CTkFrame):
         """Auto-calculate quantity from total price (FEATURE 1)."""
         if self._is_updating:
             return
-            
+
         if (
             not self.selected_product_sale_price
             or self.selected_product_sale_price <= 0
@@ -770,7 +770,7 @@ class NewSaleFrame(ctk.CTkFrame):
                 custom_price = float(self.custom_price_entry.get() or "0")
             except ValueError:
                 custom_price = 0.0
-                
+
             unit_sale_price = custom_price if custom_price > 0 else self.selected_product_sale_price
             unit_type = self.selected_product_unit_type
 
@@ -798,7 +798,7 @@ class NewSaleFrame(ctk.CTkFrame):
         """Auto-calculate total price from quantity (bidirectional calculation)."""
         if self._is_updating:
             return
-            
+
         if (
             not self.selected_product_sale_price
             or self.selected_product_sale_price <= 0
@@ -823,7 +823,7 @@ class NewSaleFrame(ctk.CTkFrame):
                  custom_price = float(self.custom_price_entry.get() or "0")
             except ValueError:
                 custom_price = 0.0
-                
+
             unit_sale_price = custom_price if custom_price > 0 else self.selected_product_sale_price
             unit_type = self.selected_product_unit_type
 
@@ -866,11 +866,19 @@ class NewSaleFrame(ctk.CTkFrame):
 
         cost_price = self.selected_product_cost_price or 0.0
 
-        # Profit per unit = custom_price - cost_price
-        profit_per_unit = custom_price - cost_price
-
-        # Total profit = profit_per_unit * quantity
-        total_profit = profit_per_unit * quantity
+        # For grams, custom_price is per kg, quantity is in grams
+        if self.selected_product_unit_type == "g":
+            # Profit per kg = custom_price (per kg) - cost_price (per kg)
+            profit_per_kg = custom_price - cost_price
+            # Total profit = profit per kg * quantity in kg
+            quantity_kg = quantity / 1000.0
+            total_profit = profit_per_kg * quantity_kg
+            # Return per-unit profit in per-kg terms (consistent with display)
+            profit_per_unit = profit_per_kg
+        else:
+            # For piece/kg: price and cost are in same unit
+            profit_per_unit = custom_price - cost_price
+            total_profit = profit_per_unit * quantity
 
         return profit_per_unit, total_profit
 
@@ -903,7 +911,7 @@ class NewSaleFrame(ctk.CTkFrame):
 
         session = get_session()
         try:
-            product = session.query(Product).get(product_id)
+            product = get_by_id(session, Product, product_id)
         finally:
             session.close()
 
@@ -1121,7 +1129,7 @@ class NewSaleFrame(ctk.CTkFrame):
         new_stock = current_stock - qty_for_stock
         session2 = get_session()
         try:
-            p2 = session2.query(Product).get(product_id)
+            p2 = get_by_id(session2, Product, product_id)
             if p2:
                 p2.stock_qty = new_stock
                 p2.synced = False  # Ensure cloud uploader picks up the change
@@ -1246,7 +1254,7 @@ class NewSaleFrame(ctk.CTkFrame):
             profit_frame, text="0.00", font=ctk.CTkFont(size=12, weight="bold")
         )
         profit_label.pack(side="left", padx=5)
-        
+
         # State tracking to prevent recursion
         self._edit_updating = False
 
@@ -1261,15 +1269,16 @@ class NewSaleFrame(ctk.CTkFrame):
                     return
 
                 # Recalc Total Price = Qty * Sale Price
+                # For grams, sale_price is per gram, cost_price is per kg
                 if unit_type == "g":
-                    # sale_price is per gram here
+                    # sale_price is per gram here; total = qty (g) * price/g
                     total = qty * sale_price
                 else:
                     total = qty * sale_price
-                
+
                 total_price_entry.delete(0, "end")
                 total_price_entry.insert(0, f"{total:.2f}")
-                
+
                 update_profit_display()
             finally:
                 self._edit_updating = False
@@ -1291,7 +1300,7 @@ class NewSaleFrame(ctk.CTkFrame):
                     qty = total / sale_price if sale_price > 0 else 0
                 else:
                     qty = total / sale_price if sale_price > 0 else 0
-                
+
                 qty_entry.delete(0, "end")
                 if unit_type == "piece":
                     qty_entry.insert(0, f"{qty:.2f}")
@@ -1312,16 +1321,16 @@ class NewSaleFrame(ctk.CTkFrame):
                      sale_price = float(sale_price_entry.get() or "0")
                 except ValueError:
                     return
-                
+
                 # Recalc Total = Qty * Sale Price
                 if unit_type == "g":
                     total = qty * sale_price
                 else:
                     total = qty * sale_price
-                
+
                 total_price_entry.delete(0, "end")
                 total_price_entry.insert(0, f"{total:.2f}")
-                
+
                 update_profit_display()
             finally:
                 self._edit_updating = False
@@ -1331,15 +1340,16 @@ class NewSaleFrame(ctk.CTkFrame):
                 sale_price = float(sale_price_entry.get() or "0")
              except ValueError:
                 return
-             
+
              # Calculate profit (normalize to per kg for weight-based products)
              if unit_type == "g":
+                # sale_price is per gram; cost_price is per kg
                 actual_sale_price_per_unit = sale_price * 1000.0
              else:
                 actual_sale_price_per_unit = sale_price
 
              profit_per_unit = actual_sale_price_per_unit - cost_price
-             
+
              profit_display_value = profit_per_unit / 1000.0 if unit_type == "g" else profit_per_unit
              profit_label.configure(
                 text=f"{profit_display_value:.2f}",
@@ -1349,7 +1359,7 @@ class NewSaleFrame(ctk.CTkFrame):
         qty_entry.bind("<KeyRelease>", update_from_qty)
         total_price_entry.bind("<KeyRelease>", update_from_total)
         sale_price_entry.bind("<KeyRelease>", update_from_price)
-        
+
         # Initial calc
         update_profit_display()
 
@@ -1398,7 +1408,7 @@ class NewSaleFrame(ctk.CTkFrame):
             # Check stock
             session = get_session()
             try:
-                product = session.query(Product).get(line["product_id"])
+                product = get_by_id(session, Product, line["product_id"])
                 current_stock = (
                     product.stock_qty or 0
                 ) + old_qty_for_stock  # Add back old qty
@@ -1505,7 +1515,7 @@ class NewSaleFrame(ctk.CTkFrame):
         if not self.bill_generated:
             session = get_session()
             try:
-                product = session.query(Product).get(line["product_id"])
+                product = get_by_id(session, Product, line["product_id"])
                 if product:
                     unit_type = line.get("unit_type", "piece") or "piece"
                     qty_to_restore = (
@@ -1545,7 +1555,7 @@ class NewSaleFrame(ctk.CTkFrame):
             session = get_session()
             try:
                 for line in self.lines:
-                    product = session.query(Product).get(line["product_id"])
+                    product = get_by_id(session, Product, line["product_id"])
                     if product:
                         unit_type = line.get("unit_type", "piece") or "piece"
                         qty_to_restore = (
@@ -1645,7 +1655,7 @@ class NewSaleFrame(ctk.CTkFrame):
         if not customer_name:
             self._show_error_popup("Customer name is required!")
             return
-            
+
         self._show_checkout_dialog(customer_name)
 
     def _show_checkout_dialog(self, customer_name: str) -> None:
@@ -1657,27 +1667,27 @@ class NewSaleFrame(ctk.CTkFrame):
 
         # Title
         ctk.CTkLabel(dialog, text="Payment Details", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
-        
+
         # Payment Method
         self.payment_method_var = ctk.StringVar(value="Cash")
-        
+
         frame = ctk.CTkFrame(dialog, fg_color="transparent")
         frame.pack(fill="x", padx=20, pady=10)
-        
+
         ctk.CTkLabel(frame, text="Payment Method:", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
-        
+
         radio_frame = ctk.CTkFrame(frame, fg_color="transparent")
         radio_frame.pack(fill="x", pady=5)
-        
+
         ctk.CTkRadioButton(radio_frame, text="Cash", variable=self.payment_method_var, value="Cash", command=self._toggle_account_dropdown).pack(side="left", padx=10)
         ctk.CTkRadioButton(radio_frame, text="Online", variable=self.payment_method_var, value="Online", command=self._toggle_account_dropdown).pack(side="left", padx=10)
 
         # Account Selection (Initially hidden or disabled)
         account_frame_outer = ctk.CTkFrame(dialog, fg_color="transparent")
         account_frame_outer.pack(fill="x", padx=20, pady=5)
-        
+
         ctk.CTkLabel(account_frame_outer, text="Select Account:", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
-        
+
         account_inner = ctk.CTkFrame(account_frame_outer, fg_color="transparent")
         account_inner.pack(fill="x", pady=5)
 
@@ -1685,7 +1695,7 @@ class NewSaleFrame(ctk.CTkFrame):
         accounts = self._load_payment_accounts()
         self.account_combo = ctk.CTkComboBox(account_inner, values=accounts, variable=self.account_var)
         self.account_combo.pack(side="left", fill="x", expand=True)
-        
+
         # Add Account Button
         self.add_account_btn = ctk.CTkButton(account_inner, text="+", width=30, command=lambda: self._add_new_account_popup(dialog, self._update_accounts_list))
         self.add_account_btn.pack(side="right", padx=5)
@@ -1700,7 +1710,7 @@ class NewSaleFrame(ctk.CTkFrame):
         """Enable/Disable account selection based on payment method."""
         is_online = self.payment_method_var.get() == "Online"
         state = "normal" if is_online else "disabled"
-        
+
         if hasattr(self, "account_combo"):
              self.account_combo.configure(state=state)
         if hasattr(self, "add_account_btn"):
@@ -1714,7 +1724,7 @@ class NewSaleFrame(ctk.CTkFrame):
     def _on_checkout_confirm(self, dialog) -> None:
         method = self.payment_method_var.get()
         account = self.account_var.get()
-        
+
         if method == "Online" and not account:
             self._show_error_popup("Please select an account for Online payment.")
             return
@@ -1752,18 +1762,29 @@ class NewSaleFrame(ctk.CTkFrame):
             discount_value = 0.0
 
         if discount_type == "Percentage":
+            self.discount_percent = discount_value
+            self.discount_fixed = 0.0
             discount_amount = subtotal * (discount_value / 100.0)
         else:
-            discount_amount = min(discount_value, subtotal)
+            self.discount_percent = 0.0
+            self.discount_fixed = min(discount_value, subtotal)
+            discount_amount = self.discount_fixed
 
         amount_after_discount = subtotal - discount_amount
+
+        # Update tax percent from UI before calculating
+        try:
+            self.tax_percent = float(self.tax_entry.get() or "0")
+        except ValueError:
+            self.tax_percent = 0.0
+
         tax_amount = amount_after_discount * (self.tax_percent / 100.0)
         net_total = amount_after_discount + tax_amount
 
         # Save to database
         self.current_payment_method = payment_method
         self.current_payment_account = payment_account
-        
+
         session = get_session()
         try:
             invoice = Invoice(
@@ -1950,16 +1971,19 @@ class NewSaleFrame(ctk.CTkFrame):
             invoice_lines.append(line_copy)
 
         subtotal = sum(l["total"] for l in self.lines)
-        discount_type = self.discount_type_combo.get()
-        try:
-            discount_value = float(self.discount_entry.get() or "0")
-        except ValueError:
-            discount_value = 0.0
 
-        if discount_type == "Percentage":
-            discount_amount = subtotal * (discount_value / 100.0)
+        if self.discount_percent > 0:
+            discount_type = "Percentage"
+            discount_value = self.discount_percent
+            discount_amount = subtotal * (self.discount_percent / 100.0)
+        elif self.discount_fixed > 0:
+            discount_type = "Fixed"
+            discount_value = self.discount_fixed
+            discount_amount = self.discount_fixed
         else:
-            discount_amount = min(discount_value, subtotal)
+            discount_type = "Percentage"
+            discount_value = 0.0
+            discount_amount = 0.0
 
         amount_after_discount = subtotal - discount_amount
         tax_amount = amount_after_discount * (self.tax_percent / 100.0)
