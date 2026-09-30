@@ -395,6 +395,7 @@ class ProductsFrame(ctk.CTkFrame):
                 p.cost_price = cost_price_kg if unit_type in ["kg", "g"] else cost_price
                 # Keep price for backward compatibility (use sale price)
                 p.price = p.base_unit_price
+                p.synced = False  # Mark for cloud update
 
                 session_local.commit()
             except Exception as e:
@@ -460,6 +461,7 @@ class ProductsFrame(ctk.CTkFrame):
                 if not p:
                     return
                 p.extra_fields = data
+                p.synced = False
                 session_local.commit()
             except Exception:
                 session_local.rollback()
@@ -500,6 +502,7 @@ class ProductsFrame(ctk.CTkFrame):
             if not p:
                 return
             p.is_active = not p.is_active
+            p.synced = False
             session.commit()
         except Exception:
             session.rollback()
@@ -552,6 +555,7 @@ class ProductsFrame(ctk.CTkFrame):
                 if not p:
                     return
                 p.stock_qty = qty
+                p.synced = False
                 session_local.commit()
             except Exception:
                 session_local.rollback()

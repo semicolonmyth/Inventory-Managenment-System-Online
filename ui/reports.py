@@ -408,11 +408,14 @@ class ReportsFrame(ctk.CTkFrame):
                 .all()
             )
             for item in invoice_items:
-                product = item.product
-                sale_price = item.unit_price or 0.0
-                cost_price = getattr(product, "cost_price", 0.0) or 0.0
+                unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = item.quantity or 0.0
-                total_profit += (sale_price - cost_price) * quantity
+                item_profit_per_unit = getattr(item, "profit", 0.0) or 0.0
+                
+                if unit_type == "g":
+                    total_profit += item_profit_per_unit * (quantity / 1000.0)
+                else:
+                    total_profit += item_profit_per_unit * quantity
 
             avg_order = total_sales / total_orders if total_orders > 0 else 0
 
@@ -457,11 +460,14 @@ class ReportsFrame(ctk.CTkFrame):
                 daily_data[day]["tax"] += inv.tax_amount or 0
                 daily_data[day]["net"] += inv.net_amount or 0
                 # Calculate profit for this item
-                product = item.product
-                sale_price = item.unit_price or 0.0
-                cost_price = getattr(product, "cost_price", 0.0) or 0.0
+                unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = item.quantity or 0.0
-                daily_data[day]["profit"] += (sale_price - cost_price) * quantity
+                item_profit_per_unit = getattr(item, "profit", 0.0) or 0.0
+                
+                if unit_type == "g":
+                    daily_data[day]["profit"] += item_profit_per_unit * (quantity / 1000.0)
+                else:
+                    daily_data[day]["profit"] += item_profit_per_unit * quantity
 
             # Convert orders sets to counts
             for day in daily_data:
@@ -1631,11 +1637,18 @@ class ReportsFrame(ctk.CTkFrame):
             )
             today_profit = 0.0
             for item in today_invoice_items:
-                product = item.product
-                sale_price = item.unit_price or 0.0
-                cost_price = getattr(product, "cost_price", 0.0) or 0.0
+                # Use stored profit if available and correct for units
+                unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = item.quantity or 0.0
-                today_profit += (sale_price - cost_price) * quantity
+                
+                # Preferred: Use the profit field we saved during sale
+                # item.profit is per kg or per piece
+                item_profit_per_unit = getattr(item, "profit", 0.0) or 0.0
+                
+                if unit_type == "g":
+                    today_profit += item_profit_per_unit * (quantity / 1000.0)
+                else:
+                    today_profit += item_profit_per_unit * quantity
             self.today_card.configure(text=f"₨{today_profit:.2f}")
 
             # Monthly profit: sum of (sale_price - cost_price) * quantity for all invoice items this month
@@ -1648,11 +1661,15 @@ class ReportsFrame(ctk.CTkFrame):
             )
             month_profit = 0.0
             for item in month_invoice_items:
-                product = item.product
-                sale_price = item.unit_price or 0.0
-                cost_price = getattr(product, "cost_price", 0.0) or 0.0
+                unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = item.quantity or 0.0
-                month_profit += (sale_price - cost_price) * quantity
+                
+                item_profit_per_unit = getattr(item, "profit", 0.0) or 0.0
+                
+                if unit_type == "g":
+                    month_profit += item_profit_per_unit * (quantity / 1000.0)
+                else:
+                    month_profit += item_profit_per_unit * quantity
             self.month_card.configure(text=f"₨{month_profit:.2f}")
 
             # Total customers (unique customer UIDs)
@@ -1680,9 +1697,9 @@ class ReportsFrame(ctk.CTkFrame):
                     low_stock_count += 1
             self.low_stock_card.configure(text=str(low_stock_count))
 
-            # Total Sale: sum of all invoice total_amount
+            # Total Sale: sum of all invoice net_amount
             total_sale = session.query(
-                func.coalesce(func.sum(Invoice.total_amount), 0.0)
+                func.coalesce(func.sum(Invoice.net_amount), 0.0)
             ).scalar()
             self.total_sale_card.configure(text=f"₨{total_sale:.2f}")
 

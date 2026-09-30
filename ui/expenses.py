@@ -238,6 +238,7 @@ class ExpensesFrame(ctk.CTkFrame):
                 e.amount = amount
                 e.category = category
                 e.notes = notes
+                e.synced = False  # Mark for cloud update
                 session_local.commit()
                 self.load_expenses()
                 win.destroy()

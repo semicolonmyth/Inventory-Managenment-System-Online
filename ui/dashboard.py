@@ -224,7 +224,7 @@ class DashboardFrame(ctk.CTkFrame):
             sales_count = q_invoices.count()
 
             total_revenue = (
-                session.query(func.coalesce(func.sum(Invoice.total_amount), 0.0))
+                session.query(func.coalesce(func.sum(Invoice.net_amount), 0.0))
                 .filter(func.date(Invoice.created_at) == today.isoformat())
                 .scalar()
             )
@@ -239,11 +239,14 @@ class DashboardFrame(ctk.CTkFrame):
                 .all()
             )
             for item in invoice_items_today:
-                product = item.product
-                sale_price = item.unit_price or 0.0
-                cost_price = getattr(product, "cost_price", 0.0) or 0.0
+                unit_type = getattr(item, "unit_type", "piece") or "piece"
                 quantity = item.quantity or 0.0
-                profit += (sale_price - cost_price) * quantity
+                item_profit_per_unit = getattr(item, "profit", 0.0) or 0.0
+                
+                if unit_type == "g":
+                    profit += item_profit_per_unit * (quantity / 1000.0)
+                else:
+                    profit += item_profit_per_unit * quantity
 
             # Top items by quantity sold today
             top_items = (
@@ -454,7 +457,7 @@ class UserDashboardFrame(ctk.CTkFrame):
             q = q.filter(func.date(Invoice.created_at) == today.isoformat())
             sales_count = q.count()
             revenue = (
-                session.query(func.coalesce(func.sum(Invoice.total_amount), 0.0))
+                session.query(func.coalesce(func.sum(Invoice.net_amount), 0.0))
                 .filter(func.date(Invoice.created_at) == today.isoformat())
                 .scalar()
             )

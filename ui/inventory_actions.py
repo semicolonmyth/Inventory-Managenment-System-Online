@@ -152,6 +152,7 @@ class InventoryActionsDialog(ctk.CTkToplevel):
             
             p.stock_qty = new_stock
             p.cost_price = new_cost
+            p.synced = False  # Mark for cloud update
             
             # Record transaction
             txn = StockTransaction(
@@ -272,6 +273,9 @@ class InventoryActionsDialog(ctk.CTkToplevel):
             
             tgt.stock_qty = new_total_qty
             tgt.cost_price = new_avg_cost
+            
+            src.synced = False  # Mark for cloud update
+            tgt.synced = False  # Mark for cloud update
             
             # Transactions
             t1 = StockTransaction(

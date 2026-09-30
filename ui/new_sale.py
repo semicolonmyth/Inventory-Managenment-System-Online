@@ -1124,6 +1124,7 @@ class NewSaleFrame(ctk.CTkFrame):
             p2 = session2.query(Product).get(product_id)
             if p2:
                 p2.stock_qty = new_stock
+                p2.synced = False  # Ensure cloud uploader picks up the change
                 tx = StockTransaction(
                     product_id=p2.id,
                     change_qty=-qty_for_stock,
@@ -1151,7 +1152,8 @@ class NewSaleFrame(ctk.CTkFrame):
         self.total_price_entry.delete(0, "end")
         self.qty_entry.configure(state="normal")
         self.qty_entry.delete(0, "end")
-        self.qty_entry.configure(state="readonly")
+        # Keep it normal so user can type for next product
+        self.qty_entry.configure(state="normal")
         self.search_entry.focus_set()
 
     def _edit_cart_item(self, event=None) -> None:
@@ -1411,6 +1413,7 @@ class NewSaleFrame(ctk.CTkFrame):
                 # Update stock
                 diff = new_qty_for_stock - old_qty_for_stock
                 product.stock_qty = current_stock - new_qty_for_stock
+                product.synced = False  # Ensure cloud uploader picks up the change
                 if abs(diff) > 0.0001:  # Use small epsilon for float comparison
                     tx = StockTransaction(
                         product_id=product.id,
@@ -1511,6 +1514,7 @@ class NewSaleFrame(ctk.CTkFrame):
                         else line["qty"]
                     )
                     product.stock_qty = (product.stock_qty or 0) + qty_to_restore
+                    product.synced = False  # Ensure cloud uploader picks up the change
                     tx = StockTransaction(
                         product_id=product.id,
                         change_qty=qty_to_restore,
@@ -1550,6 +1554,7 @@ class NewSaleFrame(ctk.CTkFrame):
                             else line["qty"]
                         )
                         product.stock_qty = (product.stock_qty or 0) + qty_to_restore
+                        product.synced = False  # Ensure cloud uploader picks up the change
                         tx = StockTransaction(
                             product_id=product.id,
                             change_qty=qty_to_restore,
@@ -2043,7 +2048,8 @@ class NewSaleFrame(ctk.CTkFrame):
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates",
         }
-        payload = [{"sku": sku, "stock_qty": int(new_stock)}]
+        # Fixed: Use float for stock_qty to avoid precision loss for kg/g items
+        payload = [{"sku": sku, "stock_qty": float(new_stock), "synced": True}]
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=5)
             if not resp.ok:
